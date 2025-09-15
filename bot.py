@@ -19,6 +19,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Configuration
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID", "-1003057761446")  # Fallback to provided ID
+
 class VideoFile:
     def __init__(self, file_id: str, filename: str, caption: Optional[str] = None, file_type: str = 'document'):
         self.file_id = file_id
@@ -55,7 +59,7 @@ class VideoSorterBot:
     def __init__(self):
         self.user_sessions: Dict[int, List[VideoFile]] = {}
         self.dump_channels: Dict[int, str] = {}  # Store dump channel ID or username per user
-        self.log_channel_id = "-1003057761446"  # Log channel chat ID from env
+        self.log_channel_id = LOG_CHANNEL_ID
 
     async def log_action(self, context: ContextTypes.DEFAULT_TYPE, user_id: int, username: str, action: str, details: str = ""):
         """Log user actions to the designated log channel"""
@@ -78,7 +82,7 @@ class VideoSorterBot:
         greeting = "Good evening" if datetime.now().hour >= 17 else "Hello"
         welcome_message = (
             f"{greeting}! 🎬 **Video Sorter Bot** 🎬\n\n"
-            f"Current time: {current_time} on Monday, September 08, 2025. "
+            f"Current time: {current_time} on {datetime.now().strftime('%A, %B %d, %Y')}. "
             "Welcome! I help you organize and sequence video files (like TV show episodes) "
             "based on their episode number and quality.\n\n"
             "**How it works:**\n"
@@ -327,33 +331,50 @@ class VideoSorterBot:
             username = update.effective_user.username or "Unknown"
             await self.log_action(context, user_id, username, "Uploaded video", f"File: {filename}")
 
-def main():
+async def main():
     """Main function to run the bot"""
-    BOT_TOKEN = "8240073637:AAFdH6VAeT9dER9pA_43cTMh5iItEV6DArE"
-    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ Error: TELEGRAM_BOT_TOKEN environment variable not set!")
-        print("Please set your bot token:")
-        print("export TELEGRAM_BOT_TOKEN='your_bot_token_here'")
+    if not BOT_TOKEN:
+        print("❌ Error: BOT_TOKEN environment variable not set!")
+        print("Set BOT_TOKEN in Render dashboard environment variables")
         return
-    # Register bot commands for suggestions
+
+    print("🤖 Video Sorter Bot is starting...")
+    print("🌐 Render Deployment: Optimized for cloud hosting")
+    print(f"📋 Log channel: {'✅ Set' if LOG_CHANNEL_ID else '❌ Not set'}")
+
+    # Create the Application
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    # Set up bot commands
     commands = [
         BotCommand("start", "Start the bot and get help"),
         BotCommand("sequence", "Start collecting video files"),
         BotCommand("endsequence", "Finish and sort the collected files"),
         BotCommand("dump", "Set a dump channel (e.g., /dump @Channel)"),
     ]
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.bot.set_my_commands(commands)
+    await application.bot.set_my_commands(commands)
+
+    # Initialize bot
     bot = VideoSorterBot()
+
+    # Add handlers
     application.add_handler(CommandHandler("start", bot.start_command))
     application.add_handler(CommandHandler("sequence", bot.sequence_command))
     application.add_handler(CommandHandler("endsequence", bot.endsequence_command))
     application.add_handler(CommandHandler("dump", bot.dump_command))
     application.add_handler(MessageHandler(filters.Document.ALL, bot.handle_document))
     application.add_handler(MessageHandler(filters.VIDEO, bot.handle_video))
-    print("🤖 Bot is starting...")
-    print("Press Ctrl+C to stop the bot")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    print("✅ Bot is running! Press Ctrl+C to stop.")
+    print("📱 Send `/sequence` to start collecting video files.")
+
+    # Run the bot
+    try:
+        await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    except KeyboardInterrupt:
+        print("\n🛑 Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot error: {e}")
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
