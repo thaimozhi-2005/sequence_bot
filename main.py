@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Telegram Video Sorter Bot - Render.com Ready
-A bot that sorts video files by episode number and quality with dump channel support
-Optimized for Render deployment with HTTP health check server
+Telegram Video Sorter Bot - RENDER OPTIMIZED
+Sorts video files by episode number and quality with dump channel support
+Deployed on Render with webhook support
 """
 import os
 import re
@@ -12,7 +12,6 @@ from typing import List, Dict, Optional
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from aiohttp import web
-from datetime import datetime
 
 # Configure logging
 logging.basicConfig(
@@ -21,62 +20,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ============================================
-# CONFIGURATION - USE ENVIRONMENT VARIABLES
-# ============================================
-BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN')
-PORT = int(os.getenv('PORT', '10000'))  # Render assigns this
+# Configuration from environment
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+PORT = int(os.getenv("PORT", 10000))
+WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL", "")  # Render provides this
 
-# ============================================
-# HTTP HEALTH CHECK SERVER FOR RENDER
-# ============================================
-async def health_check(request):
-    """Health check endpoint for Render"""
-    return web.json_response({
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'bot': 'Video Sorter Bot',
-        'version': '2.0'
-    })
-
-async def root_handler(request):
-    """Root endpoint"""
-    return web.Response(text="""
-╔══════════════════════════════════════╗
-║   VIDEO SORTER BOT - ACTIVE          ║
-╚══════════════════════════════════════╝
-
-Status: 🟢 Running
-Server Time: {}
-Port: {}
-
-Bot is running successfully on Render! ✅
-Health: /health
-
-Features:
-✅ Sort videos by episode & quality
-✅ Dump channel support
-✅ 480p/720p/1080p grouping
-""".format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'), PORT), 
-    content_type='text/plain')
-
-async def start_http_server():
-    """Start HTTP server for Render health checks"""
-    app = web.Application()
-    app.router.add_get('/', root_handler)
-    app.router.add_get('/health', health_check)
-    app.router.add_get('/status', health_check)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
-    logger.info(f"🌐 HTTP server started on 0.0.0.0:{PORT}")
-    return runner
-
-# ============================================
-# VIDEO FILE CLASS
-# ============================================
 class VideoFile:
     def __init__(self, file_id: str, filename: str, caption: Optional[str] = None, file_type: str = 'document'):
         self.file_id = file_id
@@ -156,18 +104,15 @@ class VideoFile:
     def __str__(self):
         return f"Episode {self.episode_number}, Quality {self.video_quality}: {self.filename}"
 
-# ============================================
-# VIDEO SORTER BOT CLASS
-# ============================================
 class VideoSorterBot:
     def __init__(self):
         self.user_sessions: Dict[int, List[VideoFile]] = {}
-        self.dump_channels: Dict[int, str] = {}  # Store dump channel ID or username per user
+        self.dump_channels: Dict[int, str] = {}
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
         welcome_message = (
-            "🎬 **Video Sorter Bot v2.0** 🎬\n\n"
+            "🎬 **Video Sorter Bot** 🎬\n\n"
             "Welcome! I help you organize and sequence video files (like TV show episodes) "
             "based on their episode number and quality.\n\n"
             "**How it works:**\n"
@@ -179,8 +124,8 @@ class VideoSorterBot:
             "5. Use `/dump <channel>` to set a private or public dump channel for sorted files "
             "(add the bot to the channel first).\n\n"
             "**File format expected:** `[S01-E07] Show Name [1080] [Single].mkv`\n\n"
-            "🌐 Running on Render.com\n"
-            "✅ Always online, never sleeps!\n\n"
+            "🖥️ Deployed on Render Platform\n"
+            "✅ Always online, never sleeps\n\n"
             "Ready to get started? Use `/sequence` to begin!"
         )
         await update.message.reply_text(welcome_message, parse_mode='Markdown')
@@ -526,81 +471,145 @@ class VideoSorterBot:
             )
 
 # ============================================
-# MAIN FUNCTION
+# RENDER WEBHOOK SETUP
 # ============================================
-async def main():
-    """Main function to run the bot"""
-    logger.info("=" * 50)
-    logger.info("🎬 Video Sorter Bot v2.0 Starting...")
-    logger.info("🌐 Optimized for Render.com")
-    logger.info("=" * 50)
+async def health_check(request):
+    """Health check for Render"""
+    return web.json_response({
+        'status': 'healthy',
+        'service': 'Video Sorter Bot',
+        'platform': 'Render'
+    })
 
-    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN":
-        logger.error("❌ BOT_TOKEN environment variable not set!")
-        logger.error("Please set: BOT_TOKEN=your_bot_token")
+async def webhook_handler(request, application):
+    """Handle incoming webhook updates"""
+    try:
+        data = await request.json()
+        update = Update.de_json(data, application.bot)
+        await application.process_update(update)
+        return web.Response(text="OK")
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return web.Response(status=500, text=str(e))
+
+async def setup_webhook(application):
+    """Setup webhook for Render"""
+    webhook_url = f"https://{WEBHOOK_URL}/webhook" if WEBHOOK_URL else None
+    
+    if not webhook_url:
+        logger.error("❌ RENDER_EXTERNAL_URL not set!")
+        return False
+    
+    try:
+        await application.bot.set_webhook(
+            url=webhook_url,
+            allowed_updates=Update.ALL_TYPES
+        )
+        logger.info(f"✅ Webhook set: {webhook_url}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Webhook setup failed: {e}")
+        return False
+
+async def start_server(application):
+    """Start aiohttp web server for Render"""
+    app = web.Application()
+    
+    # Health check endpoint
+    app.router.add_get('/health', health_check)
+    app.router.add_get('/status', health_check)
+    app.router.add_get('/', health_check)
+    
+    # Webhook endpoint
+    app.router.add_post('/webhook', lambda req: webhook_handler(req, application))
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    
+    logger.info(f"🌐 Server started on 0.0.0.0:{PORT}")
+    return runner
+
+def main():
+    """Main function to run the bot on Render"""
+    
+    if not BOT_TOKEN:
+        logger.error("❌ TELEGRAM_BOT_TOKEN not set!")
         return
 
-    try:
-        # START HTTP SERVER FIRST (CRITICAL FOR RENDER!)
-        logger.info(f"🌐 Starting HTTP server on 0.0.0.0:{PORT}...")
-        http_runner = await start_http_server()
-        logger.info(f"✅ HTTP server running on port {PORT}")
-        
-        # Create bot application
-        logger.info("🤖 Initializing bot...")
-        application = Application.builder().token(BOT_TOKEN).build()
-        
-        # Register bot commands for menu
-        commands = [
-            BotCommand("start", "Start the bot and get help"),
-            BotCommand("sequence", "Start collecting video files"),
-            BotCommand("endsequence", "Finish and sort the collected files"),
-            BotCommand("dump", "Set a dump channel (e.g., /dump @Channel)"),
-        ]
-        
-        bot = VideoSorterBot()
+    logger.info("=" * 50)
+    logger.info("🎬 Video Sorter Bot Starting...")
+    logger.info("🖥️ Platform: Render")
+    logger.info(f"🌐 Port: {PORT}")
+    logger.info("=" * 50)
 
-        # Add command handlers
-        application.add_handler(CommandHandler("start", bot.start_command))
-        application.add_handler(CommandHandler("sequence", bot.sequence_command))
-        application.add_handler(CommandHandler("endsequence", bot.endsequence_command))
-        application.add_handler(CommandHandler("dump", bot.dump_command))
-        application.add_handler(MessageHandler(filters.Document.ALL, bot.handle_document))
-        application.add_handler(MessageHandler(filters.VIDEO, bot.handle_video))
+    # Create application
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Register bot commands
+    commands = [
+        BotCommand("start", "Start the bot and get help"),
+        BotCommand("sequence", "Start collecting video files"),
+        BotCommand("endsequence", "Finish and sort the collected files"),
+        BotCommand("dump", "Set a dump channel (e.g., /dump @Channel)"),
+    ]
+    
+    bot = VideoSorterBot()
 
-        # Set bot commands for UI menu
-        await application.bot.set_my_commands(commands)
-        logger.info("✅ Bot commands registered")
-        
-        logger.info("=" * 50)
-        logger.info("✅ Bot is ready!")
-        logger.info(f"🔗 Health check: http://0.0.0.0:{PORT}/health")
-        logger.info("=" * 50)
-        
-        # Start polling
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-        
-        # Keep running
-        logger.info("🟢 Bot is now running... Press Ctrl+C to stop")
-        
-        # Run forever
-        while True:
-            await asyncio.sleep(3600)
+    # Add handlers
+    application.add_handler(CommandHandler("start", bot.start_command))
+    application.add_handler(CommandHandler("sequence", bot.sequence_command))
+    application.add_handler(CommandHandler("endsequence", bot.endsequence_command))
+    application.add_handler(CommandHandler("dump", bot.dump_command))
+    application.add_handler(MessageHandler(filters.Document.ALL, bot.handle_document))
+    application.add_handler(MessageHandler(filters.VIDEO, bot.handle_video))
+
+    async def post_init(app):
+        """Post initialization - set commands and webhook"""
+        await app.bot.set_my_commands(commands)
+        logger.info("✅ Bot commands set")
+
+    application.post_init = post_init
+
+    # Run with webhook on Render
+    async def run_webhook():
+        """Run bot with webhook"""
+        try:
+            await application.initialize()
+            await application.start()
             
-    except KeyboardInterrupt:
-        logger.info("👋 Bot stopped by user")
-    except Exception as e:
-        logger.error(f"❌ Error: {e}")
-        raise
-    finally:
-        if 'http_runner' in locals():
-            await http_runner.cleanup()
-            logger.info("🌐 HTTP server stopped")
-        if 'application' in locals():
+            # Setup webhook
+            if not await setup_webhook(application):
+                logger.error("❌ Webhook setup failed")
+                return
+            
+            # Start HTTP server
+            runner = await start_server(application)
+            
+            logger.info("✅ Bot is ready!")
+            logger.info("=" * 50)
+            
+            # Keep running
+            while True:
+                await asyncio.sleep(3600)
+                
+        except KeyboardInterrupt:
+            logger.info("👋 Shutting down...")
+        finally:
             await application.stop()
             await application.shutdown()
+            if 'runner' in locals():
+                await runner.cleanup()
+
+    # Check if running on Render
+    if os.getenv('RENDER'):
+        logger.info("🌐 Running on Render with webhook")
+        asyncio.run(run_webhook())
+    else:
+        # Fallback to polling for local development
+        logger.info("💻 Running locally with polling")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
