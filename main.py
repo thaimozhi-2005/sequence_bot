@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # Configuration from environment
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
-WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL", "")  # Render provides this
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")  # Set this in Render environment variables
 
 class VideoFile:
     def __init__(self, file_id: str, filename: str, caption: Optional[str] = None, file_type: str = 'document'):
@@ -494,21 +494,39 @@ async def webhook_handler(request, application):
 
 async def setup_webhook(application):
     """Setup webhook for Render"""
-    webhook_url = f"https://{WEBHOOK_URL}/webhook" if WEBHOOK_URL else None
-    
-    if not webhook_url:
-        logger.error("❌ RENDER_EXTERNAL_URL not set!")
+    if not WEBHOOK_URL:
+        logger.error("❌ WEBHOOK_URL not set!")
         return False
     
+    # Ensure URL doesn't have double https:// and properly formatted
+    webhook_url = WEBHOOK_URL.strip()
+    
+    # Remove trailing slashes
+    webhook_url = webhook_url.rstrip('/')
+    
+    # Add https:// if not present
+    if not webhook_url.startswith('http://') and not webhook_url.startswith('https://'):
+        webhook_url = f"https://{webhook_url}"
+    
+    # Add webhook endpoint
+    webhook_url = f"{webhook_url}/webhook"
+    
+    logger.info(f"🔧 Setting webhook to: {webhook_url}")
+    
     try:
-        await application.bot.set_webhook(
+        result = await application.bot.set_webhook(
             url=webhook_url,
             allowed_updates=Update.ALL_TYPES
         )
-        logger.info(f"✅ Webhook set: {webhook_url}")
-        return True
+        if result:
+            logger.info(f"✅ Webhook set successfully: {webhook_url}")
+            return True
+        else:
+            logger.error(f"❌ Webhook setup returned False")
+            return False
     except Exception as e:
         logger.error(f"❌ Webhook setup failed: {e}")
+        logger.error(f"   URL attempted: {webhook_url}")
         return False
 
 async def start_server(application):
@@ -542,6 +560,7 @@ def main():
     logger.info("🎬 Video Sorter Bot Starting...")
     logger.info("🖥️ Platform: Render")
     logger.info(f"🌐 Port: {PORT}")
+    logger.info(f"🔗 Webhook URL env: {WEBHOOK_URL}")
     logger.info("=" * 50)
 
     # Create application
